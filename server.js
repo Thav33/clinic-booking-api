@@ -128,13 +128,18 @@ app.get('/bookings', async (req, res, next) => {
       } catch {
         return error(res, 400, 'invalid cursor');
       }
-      if (!cursor || !Number.isFinite(Date.parse(cursor.created_at)) || typeof cursor.id !== 'string') {
-        return error(res, 400, 'invalid cursor');
-      }
+      if (!cursor ||
+  typeof cursor.created_at !== 'string' ||
+  !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/.test(cursor.created_at) ||
+  typeof cursor.id !== 'string' ||
+  !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cursor.id)) {
+  return error(res, 400, 'invalid cursor');
+}
     }
 
     const result = await pool.query(
-      `SELECT b.* FROM bookings b
+      `SELECT b.*,
+  to_char(b.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_created_at FROM bookings b
        WHERE lower(b.email) = lower($1)
          AND (
            $2::timestamptz IS NULL
@@ -154,7 +159,7 @@ app.get('/bookings', async (req, res, next) => {
       bookings: rows.map(bookingJson),
       next_cursor: more && last
         ? Buffer.from(JSON.stringify({
-            created_at: new Date(last.created_at).toISOString(),
+            created_at: last.cursor_created_at,
             id: last.id
           })).toString('base64url')
         : null
