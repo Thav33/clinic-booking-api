@@ -116,21 +116,52 @@ app.get('/bookings', async (req, res, next) => {
   try {
     const email = typeof req.query.email === 'string' ? req.query.email.trim().toLowerCase() : '';
     const limit = req.query.limit === undefined ? 10 : Number(req.query.limit);
-    if (!Number.isInteger(limit) || limit < 1 || limit > 50) return error(res,400,'limit must be between 1 and 50');
-    let cursor;
-    if (req.query.cursor) {
-      try { cursor = JSON.parse(Buffer.from(String(req.query.cursor),'base64url').toString()); }
-      catch { return error(res,400,'invalid cursor'); }
-      if (!cursor || !Number.isFinite(Date.parse(cursor.created_at)) || typeof cursor.id !== 'string') return error(res,400,'invalid cursor');
+    if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
+      return error(res, 400, 'limit must be between 1 and 50');
     }
-    const result = await pool.query(`SELECT * FROM bookings WHERE lower(email)=lower($1)
-      AND ($2::timestamptz IS NULL OR (created_at,id)>($2::timestamptz,$3::uuid))
-      ORDER BY created_at,id LIMIT $4`, [email || '', cursor?.created_at || null, cursor?.id || null, limit+1]);
+
+    let cursor;
+    const cursorParam = new URL(req.originalUrl, 'http://localhost').searchParams.get('cursor');
+    if (cursorParam) {
+      try {
+        cursor = JSON.parse(Buffer.from(cursorParam, 'base64url').toString());
+      } catch {
+        return error(res, 400, 'invalid cursor');
+      }
+      if (!cursor || !Number.isFinite(Date.parse(cursor.created_at)) || typeof cursor.id !== 'string') {
+        return error(res, 400, 'invalid cursor');
+      }
+    }
+
+    const result = await pool.query(
+      `SELECT b.* FROM bookings b
+       WHERE lower(b.email) = lower($1)
+         AND (
+           $2::timestamptz IS NULL
+           OR b.created_at > $2::timestamptz
+           OR (b.created_at = $2::timestamptz AND b.id > $3::uuid)
+         )
+       ORDER BY b.created_at ASC, b.id ASC
+       LIMIT $4`,
+      [email || '', cursor?.created_at || null, cursor?.id || null, limit + 1]
+    );
+
     const more = result.rows.length > limit;
-    const rows = result.rows.slice(0,limit);
+    const rows = result.rows.slice(0, limit);
     const last = rows.at(-1);
-    res.json({ bookings:rows.map(bookingJson), next_cursor:more && last ? Buffer.from(JSON.stringify({created_at:new Date(last.created_at).toISOString(),id:last.id})).toString('base64url') : null });
-  } catch (e) { next(e); }
+
+    res.json({
+      bookings: rows.map(bookingJson),
+      next_cursor: more && last
+        ? Buffer.from(JSON.stringify({
+            created_at: new Date(last.created_at).toISOString(),
+            id: last.id
+          })).toString('base64url')
+        : null
+    });
+  } catch (e) {
+    next(e);
+  }
 });
 
 app.get('/bookings/:id', async (req,res,next) => {
