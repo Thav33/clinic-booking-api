@@ -1,1 +1,31 @@
-
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Clinic appointments</title>
+<style>
+:root{font-family:Inter,system-ui,Segoe UI,sans-serif;color:#172b3a;background:#f3f7f8}body{margin:0}.wrap{max-width:960px;margin:auto;padding:32px 20px}header{background:#0b6258;color:white;padding:24px;border-radius:16px;margin-bottom:22px}h1{margin:0 0 6px;font-size:28px}p{margin:0}.panel{background:white;border:1px solid #dce7e7;border-radius:14px;padding:22px;margin:16px 0;box-shadow:0 4px 18px #13352a0a}label{font-weight:650;display:block;margin:12px 0 6px}input,select,button{font:inherit;padding:11px 12px;border:1px solid #c9d6d6;border-radius:9px}input,select{width:100%;box-sizing:border-box}button{background:#0b6258;color:white;border:0;font-weight:700;cursor:pointer;margin-top:15px}button:disabled{opacity:.55;cursor:wait}.row{display:grid;grid-template-columns:1fr 1fr;gap:14px}.slots{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}.slot{border:1px solid #dce7e7;border-radius:12px;padding:15px}.slot h3{margin:0 0 8px}.muted{color:#56706e;font-size:14px}.notice{padding:12px;border-radius:9px;margin-top:14px;background:#e9f5f1}.error{background:#fff0ee;color:#96352c}.hidden{display:none}.topline{display:flex;justify-content:space-between;align-items:center;gap:12px}@media(max-width:600px){.row{grid-template-columns:1fr}.wrap{padding:18px 12px}}
+</style>
+</head>
+<body><main class="wrap">
+<header><h1>Book a clinic appointment</h1><p>Choose an available time and we’ll confirm your booking.</p></header>
+<section class="panel">
+<div class="topline"><div><h2>Available appointments</h2><p class="muted">Select a provider or view every provider.</p></div><button id="refresh">Refresh slots</button></div>
+<label for="provider">Provider</label><select id="provider"><option value="">All providers</option></select>
+<div id="slots" class="slots" style="margin-top:16px"></div><div id="slotNotice" class="notice hidden"></div>
+</section>
+<section class="panel" id="formPanel"><h2>Your details</h2><p class="muted" id="selectedLabel">Select an appointment above to continue.</p>
+<div class="row"><div><label for="name">Full name</label><input id="name" autocomplete="name" required></div><div><label for="email">Email</label><input id="email" type="email" autocomplete="email" required></div></div>
+<button id="book" disabled>Book appointment</button><div id="result" class="notice hidden"></div></section>
+</main>
+<script>
+const apiKey=localStorage.getItem('clinic_api_key')||'';
+if(!apiKey){const value=prompt('Enter the clinic API key to use this booking demo:');if(value){localStorage.setItem('clinic_api_key',value);location.reload();}}
+const headers={'X-API-Key':apiKey,'Content-Type':'application/json'};let selected=null;let allSlots=[];
+const $=id=>document.getElementById(id);const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function show(id,text,bad=false){const el=$(id);el.textContent=text;el.classList.remove('hidden');el.classList.toggle('error',bad)}
+async function loadSlots(){ $('slots').innerHTML='<p class="muted">Loading appointments…</p>';try{const url=new URL('/slots',location.origin);if($('provider').value)url.searchParams.set('provider',$('provider').value);const r=await fetch(url,{headers});if(!r.ok)throw new Error((await r.json()).error||'Could not load slots');const data=await r.json();allSlots=data.slots;const providers=[...new Set(allSlots.map(s=>s.provider))];const old=$('provider').value;$('provider').innerHTML='<option value="">All providers</option>'+providers.map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join('');$('provider').value=old;$('slots').innerHTML='';if(!allSlots.length){$('slots').innerHTML='<p class="muted">No appointment slots found.</p>';return}for(const s of allSlots){const card=document.createElement('article');card.className='slot';card.innerHTML=`<h3>${esc(s.provider)}</h3><p>${new Date(s.start).toLocaleString()}</p><p class="muted">${s.available?'Available':'Booked'} · ${new Date(s.end).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})} end</p><button ${s.available?'':'disabled'}>${s.available?'Choose this time':'Unavailable'}</button>`;if(s.available)card.querySelector('button').onclick=()=>choose(s);$('slots').append(card)}}catch(e){$('slots').innerHTML='';show('slotNotice',e.message,true)}}
+function choose(s){selected=s;$('selectedLabel').textContent=`Selected: ${s.provider}, ${new Date(s.start).toLocaleString()}`;$('book').disabled=false;$('result').classList.add('hidden');$('formPanel').scrollIntoView({behavior:'smooth',block:'center'})}
+$('refresh').onclick=loadSlots;$('provider').onchange=loadSlots;loadSlots();
+$('book').onclick=async()=>{if(!selected)return;const button=$('book');button.disabled=true;button.textContent='Booking…';try{const r=await fetch('/bookings',{method:'POST',headers,body:JSON.stringify({slot_id:selected.id,name:$('name').value,email:$('email').value})});const data=await r.json();if(!r.ok)throw new Error(data.error||'Booking failed');show('result',`Confirmed! Booking ID: ${data.id}. A confirmation for ${data.email} is recorded.`);selected=null;$('selectedLabel').textContent='Select another appointment above to continue.';loadSlots()}catch(e){show('result',e.message,true)}finally{button.disabled=true;button.textContent='Book appointment'}};
+</script></body></html>
